@@ -1,7 +1,6 @@
 const request = require('supertest');
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
-const { createTestScheduler } = require('jest');
 
 
 function randomName() {
@@ -102,7 +101,7 @@ test('createOrder', async () => {
 
 test('viewEmptyOrders', async () => {
   //Make a new user
-  newUser = await registerNewUser();
+  const newUser = await registerNewUser();
   const viewRes = await request(app)
     .get('/api/order')
     .set('Authorization', `Bearer ${newUser.body.token}`)

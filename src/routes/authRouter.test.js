@@ -1,6 +1,7 @@
 const request = require('supertest');
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
+const { createTestScheduler } = require('jest');
 
 
 function randomName() {
@@ -128,7 +129,8 @@ test('viewMenuItems', async () => {
 })
 
 //Franchise tests
-test('createFranchise', async () => {
+test('createAndDeleteFranchise', async () => {
+  //The decision to combine these into one test is for the sake of database cleanliness
   const loginRes = await loginAdminUser();
   const newDiner = await createNewUser();
   const newFranchise = {
@@ -144,6 +146,34 @@ test('createFranchise', async () => {
     .set('Authorization', `Bearer ${loginRes.body.token}`)
     .send(newFranchise)
   expect(createRes.status).toBe(200);
+
+  const deleteRes = await request(app)
+    .delete(`/api/franchise/${createRes.body.id}`)
+    .set('Authorization', `Bearer ${loginRes.body.token}`)
+  expect(deleteRes.status).toBe(200);
+})
+
+test('createAndDeleteFranchiseNotAdmin', async () => {
+  //The decision to combine these into one test is for the sake of database cleanliness
+  const newDiner = await createNewUser();
+  const newFranchise = {
+    "name": randomName(),
+    "admins": [
+      {
+        "email": newDiner.email
+      }
+    ]
+  }
+  const createRes = await request(app)
+    .post('/api/franchise')
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+    .send(newFranchise)
+  expect(createRes.status).toBe(403);
+
+  const deleteRes = await request(app)
+    .delete(`/api/franchise/${createRes.body.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+  expect(deleteRes.status).toBe(403);
 })
 
 

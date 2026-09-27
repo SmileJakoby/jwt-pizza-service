@@ -93,7 +93,11 @@ test('createOrder', async () => {
     .post('/api/order')
     .set('Authorization', `Bearer ${testUserAuthToken}`)
     .send(testOrder);
-    expect(orderRes.status).toBe(200);
+  expect(orderRes.status).toBe(200);
+  expect(orderRes.body.order).toMatchObject({
+    ...testOrder,
+    id: expect.any(Number),
+  });
 })
 
 test('viewEmptyOrders', async () => {
@@ -104,7 +108,11 @@ test('viewEmptyOrders', async () => {
     .set('Authorization', `Bearer ${newUser.body.token}`)
 
   expect(viewRes.status).toBe(200);
-  expect(viewRes.orders).toBe(undefined);
+  expect(viewRes.body).toMatchObject({
+    dinerId: newUser.body.user.id,
+    orders: [],
+    page: 1,
+  });
 })
 
 //Menu tests
@@ -120,7 +128,8 @@ test('addMenuItem', async () => {
     .put('/api/order/menu')
     .set('Authorization', `Bearer ${(adminLoginRes).body.token}`)
     .send(newItem);
-    expect(addRes.status).toBe(200);
+  expect(addRes.status).toBe(200);
+  expect(addRes.body).toEqual(expect.arrayContaining([expect.objectContaining(newItem)]));
 })
 
 test('addMenuItemNotAdmin', async () => {
@@ -134,13 +143,23 @@ test('addMenuItemNotAdmin', async () => {
     .put('/api/order/menu')
     .set('Authorization', `Bearer ${testUserAuthToken}`)
     .send(newItem);
-    expect(addRes.status).toBe(403);
+  expect(addRes.status).toBe(403);
+  expect(addRes.body.message).toBe('unable to add menu item');
 })
 
 test('viewMenuItems', async () => {
   const viewRes = await request(app)
     .get('/api/order/menu');
   expect(viewRes.status).toBe(200);
+  expect(Array.isArray(viewRes.body)).toBe(true);
+  expect(viewRes.body.length).toBeGreaterThan(0);
+  expect(viewRes.body[0]).toEqual(expect.objectContaining({
+    id: expect.any(Number),
+    title: expect.any(String),
+    image: expect.any(String),
+    price: expect.any(Number),
+    description: expect.any(String),
+  }));
 })
 
 //Franchise tests
@@ -161,15 +180,20 @@ test('createAndDeleteFranchise', async () => {
     .set('Authorization', `Bearer ${loginRes.body.token}`)
     .send(newFranchise)
   expect(createRes.status).toBe(200);
+  expect(createRes.body).toMatchObject({
+    id: expect.any(Number),
+    name: newFranchise.name,
+    admins: [expect.objectContaining({ email: newDiner.email })],
+  });
 
   const deleteRes = await request(app)
     .delete(`/api/franchise/${createRes.body.id}`)
     .set('Authorization', `Bearer ${loginRes.body.token}`)
   expect(deleteRes.status).toBe(200);
+  expect(deleteRes.body).toEqual({ message: 'franchise deleted' });
 })
 
 test('createAndDeleteFranchiseNotAdmin', async () => {
-  //The decision to combine these into one test is for the sake of database cleanliness
   const newDiner = await createNewUser();
   const newFranchise = {
     "name": randomName(),
@@ -184,11 +208,15 @@ test('createAndDeleteFranchiseNotAdmin', async () => {
     .set('Authorization', `Bearer ${testUserAuthToken}`)
     .send(newFranchise)
   expect(createRes.status).toBe(403);
+  expect(createRes.body.message).toBe('unable to create a franchise');
 
+  const existingFranchise = await createFranchise(newDiner.email);
   const deleteRes = await request(app)
-    .delete(`/api/franchise/${createRes.body.id}`)
+    .delete(`/api/franchise/${existingFranchise.id}`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
   expect(deleteRes.status).toBe(403);
+  expect(deleteRes.body.message).toBe('unable to delete a franchise');
+  await DB.deleteFranchise(existingFranchise.id);
 })
 
 test('createStoreDeleteStore', async () => {
@@ -206,16 +234,22 @@ test('createStoreDeleteStore', async () => {
   
   expect(createRes.status).toBe(200);
   expect(createRes.body.name).toMatch(newFranchiseName);
+  expect(createRes.body).toMatchObject({
+    id: expect.any(Number),
+    franchiseId: newFranchise.id,
+  });
 
   const deleteRes = await request(app)
     .delete(`/api/franchise/${newFranchise.id}/store/${createRes.body.id}`)
     .set('Authorization', `Bearer ${loginRes.body.token}`)
   
-    expect(deleteRes.status).toBe(200);
+  expect(deleteRes.status).toBe(200);
+  expect(deleteRes.body).toEqual({ message: 'store deleted' });
+  await DB.deleteFranchise(newFranchise.id);
 })
 
 test('createStoreDeleteStoreNotAuthorized', async () => {
-  const { franchise: newFranchise, franchisee: newFranchisee } = await createFullFranchise();
+  const { franchise: newFranchise } = await createFullFranchise();
 
   const newFranchiseName = randomName();
   const createRes = await request(app)
@@ -224,12 +258,17 @@ test('createStoreDeleteStoreNotAuthorized', async () => {
     .send({ name: newFranchiseName })
   
   expect(createRes.status).toBe(403);
+  expect(createRes.body.message).toBe('unable to create a store');
 
+  const store = await DB.createStore(newFranchise.id, { name: randomName() });
   const deleteRes = await request(app)
-    .delete(`/api/franchise/${newFranchise.id}/store/${createRes.body.id}`)
+    .delete(`/api/franchise/${newFranchise.id}/store/${store.id}`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
   
-    expect(deleteRes.status).toBe(403);
+  expect(deleteRes.status).toBe(403);
+  expect(deleteRes.body.message).toBe('unable to delete a store');
+  await DB.deleteStore(newFranchise.id, store.id);
+  await DB.deleteFranchise(newFranchise.id);
 })
 
 test('getUserFranchises', async () => {
@@ -240,36 +279,46 @@ test('getUserFranchises', async () => {
   expectValidJwt(loginRes.body.token);
 
   const getUserFranchisesRes = await request(app)
-    .get(`/api/franchise/${newFranchise.id}`)
+    .get(`/api/franchise/${newFranchisee.id}`)
     .set('Authorization', `Bearer ${loginRes.body.token}`)
   
   expect(getUserFranchisesRes.status).toBe(200);
+  expect(getUserFranchisesRes.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: newFranchise.id, name: newFranchise.name }),
+  ]));
+  await DB.deleteFranchise(newFranchise.id);
 })
 
 //User tests
 
 test('Update user', async () => {
   const updateRequest = {
-  "name": "New Name",
-  "email": "new.email@example.com",
-  "password": "newPassword123",
-  "userId": testUser.id
-}
+    name: 'New Name',
+    email: `${randomName()}@example.com`,
+    password: 'newPassword123',
+  };
   const updateRes = await request(app)
     .put(`/api/user/${testUser.id}`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
     .send(updateRequest)
   
-  expect(updateRes.status).toBe(200)
+  expect(updateRes.status).toBe(200);
+  expect(updateRes.body.user).toMatchObject({
+    id: testUser.id,
+    name: updateRequest.name,
+    email: updateRequest.email,
+    roles: [expect.objectContaining({ role: Role.Diner })],
+  });
+  expect(updateRes.body.user).not.toHaveProperty('password');
+  expectValidJwt(updateRes.body.token);
 })
 
 test('Update user not authorized', async () => {
   const updateRequest = {
-  "name": "New Name",
-  "email": "new.email@example.com",
-  "password": "newPassword123",
-  "userId": testUser.id
-}
+    name: 'New Name',
+    email: `${randomName()}@example.com`,
+    password: 'newPassword123',
+  };
   const newUser = await createNewUser();
   const loginRes = await request(app).put('/api/auth').send(newUser);
   expect(loginRes.status).toBe(200);
@@ -280,7 +329,8 @@ test('Update user not authorized', async () => {
     .set('Authorization', `Bearer ${loginRes.body.token}`)
     .send(updateRequest)
   
-  expect(updateRes.status).toBe(403)
+  expect(updateRes.status).toBe(403);
+  expect(updateRes.body.message).toBe('unauthorized');
 })
 
 test('Get user', async () => {
@@ -288,8 +338,14 @@ test('Get user', async () => {
     .get(`/api/user/me`)
     .set('Authorization', `Bearer ${testUserAuthToken}`)
   
-  expect(getRes.status).toBe(200)
-  expect(getRes.body.id).toBe(testUser.id)
+  expect(getRes.status).toBe(200);
+  expect(getRes.body).toMatchObject({
+    id: testUser.id,
+    name: testUser.name,
+    email: testUser.email,
+    roles: [expect.objectContaining({ role: Role.Diner })],
+  });
+  expect(getRes.body).not.toHaveProperty('password');
 })
 
 function expectValidJwt(potentialJwt) {

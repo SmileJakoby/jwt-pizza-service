@@ -37,6 +37,20 @@ async function createNewUser() {
   return { ...user, password: 'toomanysecrets' };
 }
 
+async function createFranchise(adminEmail) {
+  return DB.createFranchise({
+    name: randomName(),
+    admins: [{ email: adminEmail }],
+  });
+}
+
+async function createFullFranchise() {
+  const franchisee = await createNewUser();
+  const franchise = await createFranchise(franchisee.email);
+
+  return { franchise, franchisee };
+}
+
 async function registerNewUser() {
   const newUser = { name: 'swag', email: 'swag@test.com', password: 'a' };
   newUser.email = Math.random().toString(36).substring(2, 12) + '@test.com';
@@ -52,6 +66,7 @@ beforeAll(async () => {
   testUser.email = Math.random().toString(36).substring(2, 12) + '@test.com';
   const registerRes = await request(app).post('/api/auth').send(testUser);
   testUserAuthToken = registerRes.body.token;
+  testUser.id = registerRes.body.user.id;
   expectValidJwt(testUserAuthToken);
 });
 
@@ -176,6 +191,106 @@ test('createAndDeleteFranchiseNotAdmin', async () => {
   expect(deleteRes.status).toBe(403);
 })
 
+test('createStoreDeleteStore', async () => {
+  const { franchise: newFranchise, franchisee: newFranchisee } = await createFullFranchise();
+
+  const loginRes = await request(app).put('/api/auth').send(newFranchisee);
+  expect(loginRes.status).toBe(200);
+  expectValidJwt(loginRes.body.token);
+
+  const newFranchiseName = randomName();
+  const createRes = await request(app)
+    .post(`/api/franchise/${newFranchise.id}/store`)
+    .set('Authorization', `Bearer ${loginRes.body.token}`)
+    .send({ name: newFranchiseName })
+  
+  expect(createRes.status).toBe(200);
+  expect(createRes.body.name).toMatch(newFranchiseName);
+
+  const deleteRes = await request(app)
+    .delete(`/api/franchise/${newFranchise.id}/store/${createRes.body.id}`)
+    .set('Authorization', `Bearer ${loginRes.body.token}`)
+  
+    expect(deleteRes.status).toBe(200);
+})
+
+test('createStoreDeleteStoreNotAuthorized', async () => {
+  const { franchise: newFranchise, franchisee: newFranchisee } = await createFullFranchise();
+
+  const newFranchiseName = randomName();
+  const createRes = await request(app)
+    .post(`/api/franchise/${newFranchise.id}/store`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+    .send({ name: newFranchiseName })
+  
+  expect(createRes.status).toBe(403);
+
+  const deleteRes = await request(app)
+    .delete(`/api/franchise/${newFranchise.id}/store/${createRes.body.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+  
+    expect(deleteRes.status).toBe(403);
+})
+
+test('getUserFranchises', async () => {
+  const { franchise: newFranchise, franchisee: newFranchisee } = await createFullFranchise();
+
+  const loginRes = await request(app).put('/api/auth').send(newFranchisee);
+  expect(loginRes.status).toBe(200);
+  expectValidJwt(loginRes.body.token);
+
+  const getUserFranchisesRes = await request(app)
+    .get(`/api/franchise/${newFranchise.id}`)
+    .set('Authorization', `Bearer ${loginRes.body.token}`)
+  
+  expect(getUserFranchisesRes.status).toBe(200);
+})
+
+//User tests
+
+test('Update user', async () => {
+  const updateRequest = {
+  "name": "New Name",
+  "email": "new.email@example.com",
+  "password": "newPassword123",
+  "userId": testUser.id
+}
+  const updateRes = await request(app)
+    .put(`/api/user/${testUser.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+    .send(updateRequest)
+  
+  expect(updateRes.status).toBe(200)
+})
+
+test('Update user not authorized', async () => {
+  const updateRequest = {
+  "name": "New Name",
+  "email": "new.email@example.com",
+  "password": "newPassword123",
+  "userId": testUser.id
+}
+  const newUser = await createNewUser();
+  const loginRes = await request(app).put('/api/auth').send(newUser);
+  expect(loginRes.status).toBe(200);
+  expectValidJwt(loginRes.body.token);
+
+  const updateRes = await request(app)
+    .put(`/api/user/${testUser.id}`)
+    .set('Authorization', `Bearer ${loginRes.body.token}`)
+    .send(updateRequest)
+  
+  expect(updateRes.status).toBe(403)
+})
+
+test('Get user', async () => {
+  const getRes = await request(app)
+    .get(`/api/user/me`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`)
+  
+  expect(getRes.status).toBe(200)
+  expect(getRes.body.id).toBe(testUser.id)
+})
 
 function expectValidJwt(potentialJwt) {
   expect(potentialJwt).toMatch(/^[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*$/);

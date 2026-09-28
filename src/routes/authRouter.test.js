@@ -83,10 +83,15 @@ test('login', async () => {
 //Order tests
 
 test('createOrder', async () => {
+  const menuRes = await request(app).get('/api/order/menu');
+  expect(menuRes.status).toBe(200);
+  expect(menuRes.body.length).toBeGreaterThan(0);
+
+  const firstMenuItem = menuRes.body[0];
   const testOrder = {
     franchiseId: 1,
     storeId: 1,
-    items: [{ menuId: 1, description: 'Veggie', price: 0.0038 }],
+    items: [{ menuId: firstMenuItem.id, description: firstMenuItem.title, price: firstMenuItem.price }],
   };
   const orderRes = await request(app)
     .post('/api/order')

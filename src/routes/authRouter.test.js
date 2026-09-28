@@ -86,7 +86,7 @@ test('createOrder', async () => {
   const testOrder = {
     franchiseId: 1,
     storeId: 1,
-    items: [{ menuId: 1, description: 'Veggie', price: 0.05 }],
+    items: [{ menuId: 1, description: `Veggie ${randomName()}`, price: 0.05 }],
   };
   const orderRes = await request(app)
     .post('/api/order')

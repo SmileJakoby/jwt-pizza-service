@@ -85,13 +85,29 @@ test('login', async () => {
 test('createOrder', async () => {
   const menuRes = await request(app).get('/api/order/menu');
   expect(menuRes.status).toBe(200);
-  expect(menuRes.body.length).toBeGreaterThan(0);
 
-  const firstMenuItem = menuRes.body[0];
+  const menuItem = {
+    title: 'Veggie',
+    image: 'pizza1.png',
+    price: 0.0038,
+    description: 'A garden of delight',
+  };
+  let orderMenuItem = menuRes.body.find((item) => item.title === menuItem.title && Number(item.price) === menuItem.price);
+  if (!orderMenuItem) {
+    const adminLoginRes = await loginAdminUser();
+    const addRes = await request(app)
+      .put('/api/order/menu')
+      .set('Authorization', `Bearer ${adminLoginRes.body.token}`)
+      .send(menuItem);
+    expect(addRes.status).toBe(200);
+    orderMenuItem = addRes.body.find((item) => item.title === menuItem.title && Number(item.price) === menuItem.price);
+  }
+  expect(orderMenuItem).toBeDefined();
+
   const testOrder = {
     franchiseId: 1,
     storeId: 1,
-    items: [{ menuId: firstMenuItem.id, description: firstMenuItem.title, price: firstMenuItem.price }],
+    items: [{ menuId: orderMenuItem.id, description: orderMenuItem.title, price: Number(orderMenuItem.price) }],
   };
   const orderRes = await request(app)
     .post('/api/order')

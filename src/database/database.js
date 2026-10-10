@@ -75,6 +75,65 @@ class DB {
     }
   }
 
+  async getUsers() {
+    const connection = await this.getConnection();
+    try {
+      const users = await this.query(connection, 'SELECT id, name, email FROM user ORDER BY id');
+      if (users.length === 0) {
+        return { users };
+      }
+
+      const userIds = users.map((user) => user.id);
+      const placeholders = userIds.map(() => '?').join(', ');
+      const roles = await this.query(
+        connection,
+        `SELECT userId, role, objectId FROM userRole WHERE userId IN (${placeholders})`,
+        userIds
+      );
+      const rolesByUserId = new Map();
+      for (const role of roles) {
+        const userRoles = rolesByUserId.get(role.userId) || [];
+        userRoles.push({ objectId: role.objectId || undefined, role: role.role });
+        rolesByUserId.set(role.userId, userRoles);
+      }
+      for (const user of users) {
+        user.roles = rolesByUserId.get(user.id) || [];
+      }
+
+      return { users };
+    } finally {
+      connection.end();
+    }
+  }
+
+  async deleteUser(userId) {
+    const connection = await this.getConnection();
+    try {
+      await connection.beginTransaction();
+      try {
+        const orders = await this.query(connection, 'SELECT id FROM dinerOrder WHERE dinerId=?', [userId]);
+        if (orders.length > 0) {
+          const orderIds = orders.map((order) => order.id);
+          const placeholders = orderIds.map(() => '?').join(', ');
+          await this.query(connection, `DELETE FROM orderItem WHERE orderId IN (${placeholders})`, orderIds);
+          await this.query(connection, `DELETE FROM dinerOrder WHERE id IN (${placeholders})`, orderIds);
+        }
+        await this.query(connection, 'DELETE FROM auth WHERE userId=?', [userId]);
+        await this.query(connection, 'DELETE FROM userRole WHERE userId=?', [userId]);
+        const result = await this.query(connection, 'DELETE FROM user WHERE id=?', [userId]);
+        if (result.affectedRows === 0) {
+          throw new StatusCodeError('unknown user', 404);
+        }
+        await connection.commit();
+      } catch (err) {
+        await connection.rollback();
+        throw err;
+      }
+    } finally {
+      connection.end();
+    }
+  }
+
   async updateUser(userId, name, email, password) {
     const connection = await this.getConnection();
     try {

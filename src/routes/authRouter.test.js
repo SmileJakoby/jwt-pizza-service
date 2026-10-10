@@ -465,13 +465,16 @@ test('list users unauthorized', async () => {
 });
 
 test('list users', async () => {
-  const [user, userToken] = await registerUser(request(app));
+  const [user] = await registerUser(request(app));
+  const adminLoginRes = await loginAdminUser();
+  expect(adminLoginRes.status).toBe(200);
   const listUsersRes = await request(app)
     .get('/api/user')
-    .set('Authorization', 'Bearer ' + userToken);
+    .set('Authorization', 'Bearer ' + adminLoginRes.body.token);
   expect(listUsersRes.status).toBe(200);
   expect(listUsersRes.body.users).toEqual(expect.arrayContaining([
     expect.objectContaining({
+      id: user.id,
       name: user.name,
       email: user.email,
       roles: expect.arrayContaining([
@@ -479,6 +482,17 @@ test('list users', async () => {
       ]),
     }),
   ]));
+  expect(listUsersRes.body.users.find((listedUser) => listedUser.id === user.id)).not.toHaveProperty('password');
+});
+
+test('list users not authorized for non-admin', async () => {
+  const [, userToken] = await registerUser(request(app));
+  const listUsersRes = await request(app)
+    .get('/api/user')
+    .set('Authorization', `Bearer ${userToken}`);
+
+  expect(listUsersRes.status).toBe(403);
+  expect(listUsersRes.body.message).toBe('unauthorized');
 });
 
 test('delete user not authorized', async () => {

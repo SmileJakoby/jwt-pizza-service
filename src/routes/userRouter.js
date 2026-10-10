@@ -1,5 +1,5 @@
 const express = require('express');
-const { asyncHandler } = require('../endpointHelper.js');
+const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 const { DB, Role } = require('../database/database.js');
 const { authRouter, setAuth } = require('./authRouter.js');
 
@@ -24,9 +24,9 @@ userRouter.docs = [
   },
   {
     method: 'GET',
-    path: '/api/user?page=1&limit=10&name=*',
+    path: '/api/user',
     requiresAuth: true,
-    description: 'Gets a list of users',
+    description: 'Lists all users (admin only)',
     example: `curl -X GET localhost:3000/api/user -H 'Authorization: Bearer tttttt'`,
     response: {
       users: [
@@ -38,6 +38,14 @@ userRouter.docs = [
         },
       ],
     },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/user/:userId',
+    requiresAuth: true,
+    description: 'Delete a user (admin only)',
+    example: `curl -X DELETE localhost:3000/api/user/1 -H 'Authorization: ******'`,
+    response: { message: 'user deleted' },
   },
 ];
 
@@ -73,17 +81,30 @@ userRouter.delete(
   '/:userId',
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
-    res.json({ message: 'not implemented' });
+    if (!req.user.isRole(Role.Admin)) {
+      throw new StatusCodeError('unauthorized', 403);
+    }
+
+    const userId = Number(req.params.userId);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      throw new StatusCodeError('invalid user id', 400);
+    }
+
+    await DB.deleteUser(userId);
+    res.json({ message: 'user deleted' });
   })
 );
 
-// listUsers
 // listUsers
 userRouter.get(
   '/',
   authRouter.authenticateToken,
   asyncHandler(async (req, res) => {
-    res.json({});
+    if (!req.user.isRole(Role.Admin)) {
+      throw new StatusCodeError('unauthorized', 403);
+    }
+
+    res.json(await DB.getUsers());
   }),
 );
 

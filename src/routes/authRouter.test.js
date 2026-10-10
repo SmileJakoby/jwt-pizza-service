@@ -368,9 +368,68 @@ test('Get user', async () => {
   expect(getRes.body).not.toHaveProperty('password');
 })
 
+test('list users unauthorized', async () => {
+  const listUsersRes = await request(app).get('/api/user');
+  expect(listUsersRes.status).toBe(401);
+});
+
+test('list users', async () => {
+  const [user, userToken] = await registerUser(request(app));
+  const listUsersRes = await request(app)
+    .get('/api/user')
+    .set('Authorization', 'Bearer ' + userToken);
+  expect(listUsersRes.status).toBe(200);
+  expect(listUsersRes.body.users).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      name: user.name,
+      email: user.email,
+      roles: expect.arrayContaining([
+        expect.objectContaining({ role: Role.Diner }),
+      ]),
+    }),
+  ]));
+});
+
+test('delete user not authorized', async () => {
+  const userToDelete = await createNewUser();
+  const deleteRes = await request(app)
+    .delete(`/api/user/${userToDelete.id}`)
+    .set('Authorization', `Bearer ${testUserAuthToken}`);
+
+  expect(deleteRes.status).toBe(403);
+  expect(deleteRes.body.message).toBe('unauthorized');
+  const loginRes = await request(app).put('/api/auth').send(userToDelete);
+  expect(loginRes.status).toBe(200);
+});
+
+test('admin deletes user', async () => {
+  const userToDelete = await createNewUser();
+  const adminLoginRes = await loginAdminUser();
+  expect(adminLoginRes.status).toBe(200);
+  const deleteRes = await request(app)
+    .delete(`/api/user/${userToDelete.id}`)
+    .set('Authorization', `Bearer ${adminLoginRes.body.token}`);
+
+  expect(deleteRes.status).toBe(200);
+  expect(deleteRes.body).toEqual({ message: 'user deleted' });
+
+  const loginRes = await request(app).put('/api/auth').send(userToDelete);
+  expect(loginRes.status).toBe(404);
+});
+
+async function registerUser(service) {
+  const testUser = {
+    name: 'pizza diner',
+    email: `${randomName()}@test.com`,
+    password: 'a',
+  };
+  const registerRes = await service.post('/api/auth').send(testUser);
+  registerRes.body.user.password = testUser.password;
+
+  return [registerRes.body.user, registerRes.body.token];
+}
+
 function expectValidJwt(potentialJwt) {
   expect(potentialJwt).toMatch(/^[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*$/);
 }
-
-
 

@@ -1,4 +1,5 @@
 const express = require('express');
+const config = require('../config.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 const { DB, Role } = require('../database/database.js');
 const { authRouter, setAuth } = require('./authRouter.js');
@@ -24,9 +25,9 @@ userRouter.docs = [
   },
   {
     method: 'GET',
-    path: '/api/user',
+    path: '/api/user?page=1&limit=10&name=*',
     requiresAuth: true,
-    description: 'Lists all users (admin only)',
+    description: 'Lists users for admins with pagination and name filtering',
     example: `curl -X GET localhost:3000/api/user -H 'Authorization: Bearer tttttt'`,
     response: {
       users: [
@@ -37,6 +38,7 @@ userRouter.docs = [
           roles: [{ role: 'admin' }],
         },
       ],
+      more: true,
     },
   },
   {
@@ -104,7 +106,15 @@ userRouter.get(
       throw new StatusCodeError('unauthorized', 403);
     }
 
-    res.json(await DB.getUsers());
+    const page = req.query.page === undefined ? 1 : Number(req.query.page);
+    const limit = req.query.limit === undefined ? config.db.listPerPage : Number(req.query.limit);
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(limit) || limit < 1 ||
+        !Number.isSafeInteger((page - 1) * limit)) {
+      throw new StatusCodeError('invalid pagination parameters', 400);
+    }
+
+    const name = typeof req.query.name === 'string' ? req.query.name : '*';
+    res.json(await DB.getUsers(page, limit, name));
   }),
 );
 

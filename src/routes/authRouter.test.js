@@ -465,16 +465,20 @@ test('list users unauthorized', async () => {
 });
 
 test('list users', async () => {
-  const [user] = await registerUser(request(app));
+  const userName = `pizza diner ${randomName()}`;
+  const [user] = await registerUser(request(app), userName);
+  const [secondUser] = await registerUser(request(app), userName);
   const adminLoginRes = await loginAdminUser();
   expect(adminLoginRes.status).toBe(200);
   const listUsersRes = await request(app)
     .get('/api/user')
+    .query({ page: 1, limit: 1, name: userName })
     .set('Authorization', 'Bearer ' + adminLoginRes.body.token);
   expect(listUsersRes.status).toBe(200);
+  expect(listUsersRes.body.more).toBe(true);
   expect(listUsersRes.body.users).toEqual(expect.arrayContaining([
     expect.objectContaining({
-      id: user.id,
+      id: expect.any(Number),
       name: user.name,
       email: user.email,
       roles: expect.arrayContaining([
@@ -482,7 +486,21 @@ test('list users', async () => {
       ]),
     }),
   ]));
-  expect(listUsersRes.body.users.find((listedUser) => listedUser.id === user.id)).not.toHaveProperty('password');
+  expect(listUsersRes.body.users[0]).not.toHaveProperty('password');
+
+  const nextPageRes = await request(app)
+    .get('/api/user')
+    .query({ page: 2, limit: 1, name: userName })
+    .set('Authorization', 'Bearer ' + adminLoginRes.body.token);
+  expect(nextPageRes.status).toBe(200);
+  expect(nextPageRes.body.more).toBe(false);
+  expect(nextPageRes.body.users).toEqual([
+    expect.objectContaining({
+      id: secondUser.id,
+      name: secondUser.name,
+      email: secondUser.email,
+    }),
+  ]);
 });
 
 test('list users not authorized for non-admin', async () => {
@@ -522,9 +540,9 @@ test('admin deletes user', async () => {
   expect(loginRes.status).toBe(404);
 });
 
-async function registerUser(service) {
+async function registerUser(service, name = 'pizza diner') {
   const testUser = {
-    name: 'pizza diner',
+    name,
     email: `${randomName()}@test.com`,
     password: 'a',
   };

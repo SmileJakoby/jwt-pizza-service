@@ -75,12 +75,24 @@ class DB {
     }
   }
 
-  async getUsers() {
+  async getUsers(page = 1, limit = config.db.listPerPage, nameFilter = '*') {
     const connection = await this.getConnection();
     try {
-      const users = await this.query(connection, 'SELECT id, name, email FROM user ORDER BY id');
+      const offset = (page - 1) * limit;
+      const namePattern = nameFilter.replace(/\*/g, '%');
+      let users = await this.query(
+        connection,
+        'SELECT id, name, email FROM user WHERE name LIKE ? ORDER BY id LIMIT ? OFFSET ?',
+        [namePattern, limit + 1, offset]
+      );
+
+      const more = users.length > limit;
+      if (more) {
+        users = users.slice(0, limit);
+      }
+
       if (users.length === 0) {
-        return { users };
+        return { users, more };
       }
 
       const userIds = users.map((user) => user.id);
@@ -100,7 +112,7 @@ class DB {
         user.roles = rolesByUserId.get(user.id) || [];
       }
 
-      return { users };
+      return { users, more };
     } finally {
       connection.end();
     }

@@ -2,9 +2,23 @@ const request = require('supertest');
 const app = require('../service');
 const { Role, DB } = require('../database/database.js');
 
+const createdUserIds = new Set();
+const createdFranchiseIds = new Set();
+const createdMenuItemIds = new Set();
+const createdOrderIds = new Set();
+
 
 function randomName() {
   return Math.random().toString(36).substring(2, 12);
+}
+
+function trackNewMenuItems(existingItems, currentItems) {
+  const existingIds = new Set(existingItems.map((item) => item.id));
+  for (const item of currentItems) {
+    if (!existingIds.has(item.id)) {
+      createdMenuItemIds.add(item.id);
+    }
+  }
 }
 
 if (process.env.VSCODE_INSPECTOR_OPTIONS) {
@@ -18,6 +32,7 @@ async function createAdminUser() {
   user.email = user.name + '@admin.com';
 
   user = await DB.addUser(user);
+  createdUserIds.add(user.id);
   return { ...user, password: 'toomanysecrets' };
 }
 
@@ -33,14 +48,17 @@ async function createNewUser() {
   user.email = user.name + '@diner.com';
 
   user = await DB.addUser(user);
+  createdUserIds.add(user.id);
   return { ...user, password: 'toomanysecrets' };
 }
 
 async function createFranchise(adminEmail) {
-  return DB.createFranchise({
+  const franchise = await DB.createFranchise({
     name: randomName(),
     admins: [{ email: adminEmail }],
   });
+  createdFranchiseIds.add(franchise.id);
+  return franchise;
 }
 
 async function createFullFranchise() {
@@ -54,6 +72,9 @@ async function registerNewUser() {
   const newUser = { name: 'swag', email: 'swag@test.com', password: 'a' };
   newUser.email = Math.random().toString(36).substring(2, 12) + '@test.com';
   const registerRes = await request(app).post('/api/auth').send(newUser);
+  if (registerRes.body.user?.id) {
+    createdUserIds.add(registerRes.body.user.id);
+  }
   return registerRes;
 }
 
@@ -67,6 +88,62 @@ beforeAll(async () => {
   testUserAuthToken = registerRes.body.token;
   testUser.id = registerRes.body.user.id;
   expectValidJwt(testUserAuthToken);
+});
+
+afterEach(async () => {
+  if (createdUserIds.size === 0 && createdFranchiseIds.size === 0 &&
+      createdMenuItemIds.size === 0 && createdOrderIds.size === 0) {
+    return;
+  }
+
+  const connection = await DB.getConnection();
+  try {
+    for (const franchiseId of createdFranchiseIds) {
+      await DB.query(connection, 'DELETE FROM store WHERE franchiseId=?', [franchiseId]);
+      await DB.query(connection, 'DELETE FROM userRole WHERE objectId=?', [franchiseId]);
+      await DB.query(connection, 'DELETE FROM franchise WHERE id=?', [franchiseId]);
+    }
+
+    if (createdOrderIds.size > 0) {
+      const orderIds = [...createdOrderIds];
+      const placeholders = orderIds.map(() => '?').join(', ');
+      await DB.query(connection, `DELETE FROM orderItem WHERE orderId IN (${placeholders})`, orderIds);
+      await DB.query(connection, `DELETE FROM dinerOrder WHERE id IN (${placeholders})`, orderIds);
+    }
+
+    for (const menuItemId of createdMenuItemIds) {
+      await DB.query(connection, 'DELETE FROM menu WHERE id=?', [menuItemId]);
+    }
+
+    if (createdUserIds.size > 0) {
+      const userIds = [...createdUserIds];
+      const placeholders = userIds.map(() => '?').join(', ');
+      await DB.query(connection, `DELETE FROM auth WHERE userId IN (${placeholders})`, userIds);
+      await DB.query(connection, `DELETE FROM userRole WHERE userId IN (${placeholders})`, userIds);
+      await DB.query(connection, `DELETE FROM user WHERE id IN (${placeholders})`, userIds);
+    }
+  } finally {
+    connection.end();
+    createdUserIds.clear();
+    createdFranchiseIds.clear();
+    createdMenuItemIds.clear();
+    createdOrderIds.clear();
+  }
+});
+
+afterAll(async () => {
+  if (!testUser.id) {
+    return;
+  }
+
+  const connection = await DB.getConnection();
+  try {
+    await DB.query(connection, 'DELETE FROM auth WHERE userId=?', [testUser.id]);
+    await DB.query(connection, 'DELETE FROM userRole WHERE userId=?', [testUser.id]);
+    await DB.query(connection, 'DELETE FROM user WHERE id=?', [testUser.id]);
+  } finally {
+    connection.end();
+  }
 });
 
 test('login', async () => {
@@ -99,6 +176,9 @@ test('createOrder', async () => {
       .put('/api/order/menu')
       .set('Authorization', `Bearer ${adminLoginRes.body.token}`)
       .send(menuItem);
+    if (Array.isArray(addRes.body)) {
+      trackNewMenuItems(menuRes.body, addRes.body);
+    }
     expect(addRes.status).toBe(200);
     orderMenuItem = addRes.body.find((item) => item.title === menuItem.title && Number(item.price) === menuItem.price);
   }
@@ -113,6 +193,9 @@ test('createOrder', async () => {
     .post('/api/order')
     .set('Authorization', `Bearer ${testUserAuthToken}`)
     .send(testOrder);
+  if (orderRes.body.order?.id) {
+    createdOrderIds.add(orderRes.body.order.id);
+  }
   expect(orderRes.status).toBe(200);
   expect(orderRes.body.order).toMatchObject({
     ...testOrder,
@@ -143,11 +226,16 @@ test('addMenuItem', async () => {
     "price": 0.005,
     "description": "There is a reason this flavor has struggled to make it out of Korea."
   }
+  const menuBeforeRes = await request(app).get('/api/order/menu');
+  expect(menuBeforeRes.status).toBe(200);
   const adminLoginRes = await loginAdminUser();
   const addRes = await request(app)
     .put('/api/order/menu')
     .set('Authorization', `Bearer ${(adminLoginRes).body.token}`)
     .send(newItem);
+  if (Array.isArray(addRes.body)) {
+    trackNewMenuItems(menuBeforeRes.body, addRes.body);
+  }
   expect(addRes.status).toBe(200);
   expect(addRes.body).toEqual(expect.arrayContaining([expect.objectContaining(newItem)]));
 })
@@ -199,6 +287,9 @@ test('createAndDeleteFranchise', async () => {
     .post('/api/franchise')
     .set('Authorization', `Bearer ${loginRes.body.token}`)
     .send(newFranchise)
+  if (createRes.body.id) {
+    createdFranchiseIds.add(createRes.body.id);
+  }
   expect(createRes.status).toBe(200);
   expect(createRes.body).toMatchObject({
     id: expect.any(Number),
@@ -424,6 +515,9 @@ async function registerUser(service) {
     password: 'a',
   };
   const registerRes = await service.post('/api/auth').send(testUser);
+  if (registerRes.body.user?.id) {
+    createdUserIds.add(registerRes.body.user.id);
+  }
   registerRes.body.user.password = testUser.password;
 
   return [registerRes.body.user, registerRes.body.token];
@@ -432,4 +526,3 @@ async function registerUser(service) {
 function expectValidJwt(potentialJwt) {
   expect(potentialJwt).toMatch(/^[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*\.[a-zA-Z0-9\-_]*$/);
 }
-

@@ -156,6 +156,22 @@ test('login', async () => {
   expect(loginRes.body.user).toMatchObject(expectedUser);
 });
 
+test('default admin login returns admin role', async () => {
+  const loginRes = await request(app)
+    .put('/api/auth')
+    .send({ email: 'a@jwt.com', password: 'admin' });
+
+  expect(loginRes.status).toBe(200);
+  expect(loginRes.body.user.roles).toEqual(
+    expect.arrayContaining([expect.objectContaining({ role: Role.Admin })])
+  );
+
+  const logoutRes = await request(app)
+    .delete('/api/auth')
+    .set('Authorization', `Bearer ${loginRes.body.token}`);
+  expect(logoutRes.status).toBe(200);
+});
+
 
 //Order tests
 

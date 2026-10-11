@@ -415,9 +415,32 @@ class DB {
           await connection.query(statement);
         }
 
-        if (!dbExists) {
-          const defaultAdmin = { name: '常用名字', email: 'a@jwt.com', password: 'admin', roles: [{ role: Role.Admin }] };
-          this.addUser(defaultAdmin);
+        const defaultAdmin = { name: '常用名字', email: 'a@jwt.com', password: 'admin' };
+        const adminUsers = await this.query(connection, 'SELECT id FROM user WHERE email=?', [defaultAdmin.email]);
+        let adminId;
+        if (adminUsers.length === 0) {
+          const hashedPassword = await bcrypt.hash(defaultAdmin.password, 10);
+          const result = await this.query(
+            connection,
+            'INSERT INTO user (name, email, password) VALUES (?, ?, ?)',
+            [defaultAdmin.name, defaultAdmin.email, hashedPassword]
+          );
+          adminId = result.insertId;
+        } else {
+          adminId = adminUsers[0].id;
+        }
+
+        const adminRoles = await this.query(
+          connection,
+          'SELECT id FROM userRole WHERE userId=? AND role=? AND objectId=0',
+          [adminId, Role.Admin]
+        );
+        if (adminRoles.length === 0) {
+          await this.query(
+            connection,
+            'INSERT INTO userRole (userId, role, objectId) VALUES (?, ?, 0)',
+            [adminId, Role.Admin]
+          );
         }
       } finally {
         connection.end();

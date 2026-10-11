@@ -272,18 +272,27 @@ test('addMenuItemNotAdmin', async () => {
 })
 
 test('viewMenuItems', async () => {
+  const menuItem = await DB.addMenuItem({
+    title: `menu test ${randomName()}`,
+    image: 'menu-test.png',
+    price: 0.001,
+    description: 'Temporary menu item for the menu listing test',
+  });
+  createdMenuItemIds.add(menuItem.id);
+
   const viewRes = await request(app)
     .get('/api/order/menu');
   expect(viewRes.status).toBe(200);
   expect(Array.isArray(viewRes.body)).toBe(true);
-  expect(viewRes.body.length).toBeGreaterThan(0);
-  expect(viewRes.body[0]).toEqual(expect.objectContaining({
-    id: expect.any(Number),
-    title: expect.any(String),
-    image: expect.any(String),
-    price: expect.any(Number),
-    description: expect.any(String),
-  }));
+  expect(viewRes.body).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      id: menuItem.id,
+      title: menuItem.title,
+      image: menuItem.image,
+      price: menuItem.price,
+      description: menuItem.description,
+    }),
+  ]));
 })
 
 //Franchise tests

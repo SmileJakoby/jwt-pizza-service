@@ -4,6 +4,15 @@ const config = require('../config.js');
 const { StatusCodeError } = require('../endpointHelper.js');
 const { Role } = require('../model/model.js');
 const dbModel = require('./dbModel.js');
+
+const defaultMenuItems = [
+  { title: 'Veggie', description: 'A garden of delight', image: 'pizza1.png', price: 0.0038 },
+  { title: 'Pepperoni', description: 'Spicy treat', image: 'pizza2.png', price: 0.0042 },
+  { title: 'Margarita', description: 'Essential classic', image: 'pizza3.png', price: 0.0042 },
+  { title: 'Crusty', description: 'A dry mouthed favorite', image: 'pizza4.png', price: 0.0028 },
+  { title: 'Charred Leopard', description: 'For those with a darker side', image: 'pizza5.png', price: 0.0099 },
+];
+
 class DB {
   constructor() {
     this.initialized = this.initializeDatabase();
@@ -413,6 +422,17 @@ class DB {
 
         for (const statement of dbModel.tableCreateStatements) {
           await connection.query(statement);
+        }
+
+        for (const item of defaultMenuItems) {
+          const existingItems = await this.query(connection, 'SELECT id FROM menu WHERE title=?', [item.title]);
+          if (existingItems.length === 0) {
+            await this.query(
+              connection,
+              'INSERT INTO menu (title, description, image, price) VALUES (?, ?, ?, ?)',
+              [item.title, item.description, item.image, item.price]
+            );
+          }
         }
 
         const defaultAdmin = { name: '常用名字', email: 'a@jwt.com', password: 'admin' };

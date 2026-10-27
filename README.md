@@ -32,6 +32,8 @@ module.exports =  {
 };
 ```
 
+On startup, the service creates the database and tables if needed, ensures the default admin exists, and adds the five sample menu items if their titles are not already present. This does not run `generatePizzaData.sh`; that script separately adds sample users and franchise/store data.
+
 ## Endpoints
 
 You can get the documentation for all endpoints by making the following request.

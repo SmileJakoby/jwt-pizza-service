@@ -3,12 +3,23 @@ const config = require('./config.js');
 
 const activeUserWindowMs = 5 * 60 * 1000;
 const latencyBuckets = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
+const cumulativeTemporality = 'AGGREGATION_TEMPORALITY_CUMULATIVE';
+const processStartTimeUnixNano = (BigInt(Date.now()) * 1000000n).toString();
 const requestCounts = new Map();
 const requestDurations = new Map();
 const activeUsers = new Map();
 const trackedMethods = new Set(['GET', 'POST', 'PUT', 'DELETE']);
+const authAttemptCounts = { success: 0, failure: 0 };
+const pizzaCreationDurations = {
+  success: { count: 0, sum: 0, bucketCounts: Array(latencyBuckets.length + 1).fill(0) },
+  failure: { count: 0, sum: 0, bucketCounts: Array(latencyBuckets.length + 1).fill(0) },
+};
+let pizzasSold = 0;
+let pizzaCreationFailures = 0;
+let revenue = 0;
 let reportingTimer;
 let reportingInProgress = false;
+let previousCpuTimes = getCpuTimes();
 
 function requestTracker(req, res, next) {
   if (!trackedMethods.has(req.method)) {
@@ -36,6 +47,22 @@ function activeUserTracker(req, res, next) {
   next();
 }
 
+function recordAuthAttempt(success) {
+  authAttemptCounts[success ? 'success' : 'failure']++;
+}
+
+function recordPizzaCreation({ success, latencyMs, pizzaCount = 0, revenue: orderRevenue = 0 }) {
+  const outcome = success ? 'success' : 'failure';
+  recordDuration(outcome, latencyMs, pizzaCreationDurations);
+
+  if (success) {
+    pizzasSold += pizzaCount;
+    revenue += orderRevenue;
+  } else {
+    pizzaCreationFailures++;
+  }
+}
+
 function getEndpoint(req) {
   const routePath = req.route?.path;
   if (typeof routePath !== 'string' || routePath === '*') {
@@ -44,11 +71,15 @@ function getEndpoint(req) {
   return `${req.baseUrl || ''}${routePath}` || '/';
 }
 
-function recordDuration(key, durationMs) {
-  let data = requestDurations.get(key);
+function recordDuration(key, durationMs, durations = requestDurations) {
+  let data = durations instanceof Map ? durations.get(key) : durations[key];
   if (!data) {
     data = { count: 0, sum: 0, bucketCounts: Array(latencyBuckets.length + 1).fill(0) };
-    requestDurations.set(key, data);
+    if (durations instanceof Map) {
+      durations.set(key, data);
+    } else {
+      durations[key] = data;
+    }
   }
 
   data.count++;
@@ -69,7 +100,7 @@ function buildMetrics() {
       stringAttribute('http.route', endpoint),
       intAttribute('http.response.status_code', statusCode),
     ];
-    requestPoints.push({ asInt: String(count), timeUnixNano, attributes });
+    requestPoints.push({ asInt: String(count), startTimeUnixNano: processStartTimeUnixNano, timeUnixNano, attributes });
 
     const duration = requestDurations.get(key);
     durationPoints.push({
@@ -77,6 +108,7 @@ function buildMetrics() {
       sum: duration.sum,
       explicitBounds: latencyBuckets,
       bucketCounts: duration.bucketCounts.map(String),
+      startTimeUnixNano: processStartTimeUnixNano,
       timeUnixNano,
       attributes,
     });
@@ -95,7 +127,7 @@ function buildMetrics() {
       unit: '{request}',
       sum: {
         dataPoints: requestPoints,
-        aggregationTemporality: 1,
+        aggregationTemporality: cumulativeTemporality,
         isMonotonic: true,
       },
     },
@@ -104,7 +136,7 @@ function buildMetrics() {
       unit: 'ms',
       histogram: {
         dataPoints: durationPoints,
-        aggregationTemporality: 1,
+        aggregationTemporality: cumulativeTemporality,
       },
     },
     {
@@ -112,6 +144,77 @@ function buildMetrics() {
       unit: '{user}',
       gauge: {
         dataPoints: [{ asInt: String(activeUsers.size), timeUnixNano, attributes: [] }],
+      },
+    },
+    {
+      name: 'auth.attempts',
+      unit: '{attempt}',
+      sum: {
+        dataPoints: ['success', 'failure'].map((outcome) => ({
+          asInt: String(authAttemptCounts[outcome]),
+          startTimeUnixNano: processStartTimeUnixNano,
+          timeUnixNano,
+          attributes: [stringAttribute('auth.outcome', outcome)],
+        })),
+        aggregationTemporality: cumulativeTemporality,
+        isMonotonic: true,
+      },
+    },
+    {
+      name: 'pizza.sold',
+      unit: '{pizza}',
+      sum: {
+        dataPoints: [{ asInt: String(pizzasSold), startTimeUnixNano: processStartTimeUnixNano, timeUnixNano, attributes: [] }],
+        aggregationTemporality: cumulativeTemporality,
+        isMonotonic: true,
+      },
+    },
+    {
+      name: 'pizza.creation.failures',
+      unit: '{failure}',
+      sum: {
+        dataPoints: [{ asInt: String(pizzaCreationFailures), startTimeUnixNano: processStartTimeUnixNano, timeUnixNano, attributes: [] }],
+        aggregationTemporality: cumulativeTemporality,
+        isMonotonic: true,
+      },
+    },
+    {
+      name: 'pizza.revenue',
+      unit: 'USD',
+      sum: {
+        dataPoints: [{ asDouble: revenue, startTimeUnixNano: processStartTimeUnixNano, timeUnixNano, attributes: [] }],
+        aggregationTemporality: cumulativeTemporality,
+        isMonotonic: true,
+      },
+    },
+    {
+      name: 'pizza.creation.duration',
+      unit: 'ms',
+      histogram: {
+        dataPoints: ['success', 'failure'].map((outcome) => ({
+          count: String(pizzaCreationDurations[outcome].count),
+          sum: pizzaCreationDurations[outcome].sum,
+          explicitBounds: latencyBuckets,
+          bucketCounts: pizzaCreationDurations[outcome].bucketCounts.map(String),
+          startTimeUnixNano: processStartTimeUnixNano,
+          timeUnixNano,
+          attributes: [stringAttribute('pizza.creation.outcome', outcome)],
+        })),
+        aggregationTemporality: cumulativeTemporality,
+      },
+    },
+    {
+      name: 'system.cpu.utilization',
+      unit: '%',
+      gauge: {
+        dataPoints: [{ asDouble: getCpuUsagePercentage(), timeUnixNano, attributes: [] }],
+      },
+    },
+    {
+      name: 'system.memory.utilization',
+      unit: '%',
+      gauge: {
+        dataPoints: [{ asDouble: getMemoryUsagePercentage(), timeUnixNano, attributes: [] }],
       },
     },
   ];
@@ -153,33 +256,9 @@ function startMetricsReporting(period = 10000) {
     }
 
     reportingInProgress = true;
-    let counts;
-    let durations;
-    let metricsCleared = false;
     try {
-      const metrics = buildMetrics();
-      counts = new Map(requestCounts);
-      durations = new Map(requestDurations);
-      requestCounts.clear();
-      requestDurations.clear();
-      metricsCleared = true;
-      await sendMetricToGrafana(metrics);
+      await sendMetricToGrafana(buildMetrics());
     } catch (error) {
-      if (metricsCleared) {
-        for (const [key, count] of counts) {
-          requestCounts.set(key, (requestCounts.get(key) || 0) + count);
-        }
-        for (const [key, duration] of durations) {
-          const current = requestDurations.get(key);
-          if (current) {
-            current.count += duration.count;
-            current.sum += duration.sum;
-            current.bucketCounts = current.bucketCounts.map((count, index) => count + duration.bucketCounts[index]);
-          } else {
-            requestDurations.set(key, duration);
-          }
-        }
-      }
       console.error('Error sending metrics to Grafana:', error);
     } finally {
       reportingInProgress = false;
@@ -206,16 +285,28 @@ function intAttribute(key, value) {
 }
 
 function getCpuUsagePercentage() {
-  const cpuUsage = os.loadavg()[0] / os.cpus().length;
-  return cpuUsage.toFixed(2) * 100;
+  const currentCpuTimes = getCpuTimes();
+  const totalDelta = currentCpuTimes.total - previousCpuTimes.total;
+  const idleDelta = currentCpuTimes.idle - previousCpuTimes.idle;
+  previousCpuTimes = currentCpuTimes;
+  return totalDelta > 0 ? ((totalDelta - idleDelta) / totalDelta) * 100 : 0;
 }
 
 function getMemoryUsagePercentage() {
   const totalMemory = os.totalmem();
   const freeMemory = os.freemem();
   const usedMemory = totalMemory - freeMemory;
-  const memoryUsage = (usedMemory / totalMemory) * 100;
-  return memoryUsage.toFixed(2);
+  return (usedMemory / totalMemory) * 100;
+}
+
+function getCpuTimes() {
+  return os.cpus().reduce(
+    (totals, cpu) => ({
+      idle: totals.idle + cpu.times.idle,
+      total: totals.total + Object.values(cpu.times).reduce((sum, time) => sum + time, 0),
+    }),
+    { idle: 0, total: 0 },
+  );
 }
 
 module.exports = {
@@ -223,6 +314,8 @@ module.exports = {
   getMemoryUsagePercentage,
   activeUserTracker,
   requestTracker,
+  recordAuthAttempt,
+  recordPizzaCreation,
   startMetricsReporting,
   stopMetricsReporting,
 };

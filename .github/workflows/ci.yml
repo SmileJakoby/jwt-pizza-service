@@ -127,6 +127,19 @@ jobs:
         run: |
           docker build --platform=linux/arm64 -t $ECR_REGISTRY/$ECR_REPOSITORY --push .
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >>  $GITHUB_OUTPUT
+
+      - name: Deploy image to ECS
+        env:
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'jwt-pizza-service' }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE || 'jwt-pizza-service' }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE"
   release:
     needs:
       - build

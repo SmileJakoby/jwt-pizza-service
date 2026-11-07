@@ -42,6 +42,10 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/checkDeployment', (req, res) => {
+  res.send('I have been deployed');
+});
+
 app.use('*', (req, res) => {
   res.status(404).json({
     message: 'unknown endpoint',

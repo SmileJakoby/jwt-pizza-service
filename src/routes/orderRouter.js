@@ -4,6 +4,7 @@ const { Role, DB } = require('../database/database.js');
 const { authRouter } = require('./authRouter.js');
 const { asyncHandler, StatusCodeError } = require('../endpointHelper.js');
 const metrics = require('../metrics.js');
+const logger = require('../logger.js');
 
 const orderRouter = express.Router();
 
@@ -90,12 +91,23 @@ orderRouter.post(
         revenue: success ? order.items.reduce((total, item) => total + Number(item.price), 0) : 0,
       });
     });
-    const r = await fetch(`${config.factory.url}/api/order`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${config.factory.apiKey}` },
-      body: JSON.stringify({ diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order }),
-    });
-    const j = await r.json();
+    const factoryRequest = { diner: { id: req.user.id, name: req.user.name, email: req.user.email }, order };
+    let r;
+    let j;
+    let responseBody;
+    try {
+      r = await fetch(`${config.factory.url}/api/order`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', authorization: `Bearer ${config.factory.apiKey}` },
+        body: JSON.stringify(factoryRequest),
+      });
+      responseBody = await r.text();
+      j = JSON.parse(responseBody);
+      logger.logFactory(factoryRequest, responseBody, r.status);
+    } catch (error) {
+      logger.logFactory(factoryRequest, responseBody, r?.status, error);
+      throw error;
+    }
     if (r.ok) {
       res.send({ order, followLinkToEndChaos: j.reportUrl, jwt: j.jwt });
     } else {

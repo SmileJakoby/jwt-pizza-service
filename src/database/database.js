@@ -4,6 +4,7 @@ const config = require('../config.js');
 const { StatusCodeError } = require('../endpointHelper.js');
 const { Role } = require('../model/model.js');
 const dbModel = require('./dbModel.js');
+const logger = require('../logger.js');
 
 const defaultMenuItems = [
   { title: 'Veggie', description: 'A garden of delight', image: 'pizza1.png', price: 0.0038 },
@@ -374,12 +375,13 @@ class DB {
   }
 
   async query(connection, sql, params) {
+    logger.logDatabase(sql);
     const [results] = await connection.execute(sql, params);
     return results;
   }
 
   async getID(connection, key, value, table) {
-    const [rows] = await connection.execute(`SELECT id FROM ${table} WHERE ${key}=?`, [value]);
+    const rows = await this.query(connection, `SELECT id FROM ${table} WHERE ${key}=?`, [value]);
     if (rows.length > 0) {
       return rows[0].id;
     }
@@ -401,7 +403,7 @@ class DB {
       decimalNumbers: true,
     });
     if (setUse) {
-      await connection.query(`USE ${config.db.connection.database}`);
+      await this.query(connection, `USE ${config.db.connection.database}`);
     }
     return connection;
   }
@@ -413,15 +415,15 @@ class DB {
         const dbExists = await this.checkDatabaseExists(connection);
         console.log(dbExists ? 'Database exists' : 'Database does not exist, creating it');
 
-        await connection.query(`CREATE DATABASE IF NOT EXISTS ${config.db.connection.database}`);
-        await connection.query(`USE ${config.db.connection.database}`);
+        await this.query(connection, `CREATE DATABASE IF NOT EXISTS ${config.db.connection.database}`);
+        await this.query(connection, `USE ${config.db.connection.database}`);
 
         if (!dbExists) {
           console.log('Successfully created database');
         }
 
         for (const statement of dbModel.tableCreateStatements) {
-          await connection.query(statement);
+          await this.query(connection, statement);
         }
 
         for (const item of defaultMenuItems) {
@@ -466,12 +468,16 @@ class DB {
         connection.end();
       }
     } catch (err) {
-      console.error(JSON.stringify({ message: 'Error initializing database', exception: err.message, connection: config.db.connection }));
+      logger.logException(err);
+      console.error(JSON.stringify({
+        message: 'Error initializing database',
+        exception: logger.sanitizeText(err.message),
+      }));
     }
   }
 
   async checkDatabaseExists(connection) {
-    const [rows] = await connection.execute(`SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?`, [config.db.connection.database]);
+    const rows = await this.query(connection, `SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?`, [config.db.connection.database]);
     return rows.length > 0;
   }
 }

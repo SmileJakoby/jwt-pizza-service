@@ -22,13 +22,16 @@ class Logger {
 
       res.once('finish', () => {
         this.log('http', {
+          level: this.getHttpLevel(res.statusCode),
+          Type: 'http',
           method: req.method,
           path: req.path,
-          statusCode: res.statusCode,
+          status: res.statusCode,
+          req: req.body,
+          res: responseBody,
+          ip: req.ip || req.socket?.remoteAddress,
           hasAuthorizationHeader: req.headers.authorization !== undefined,
           user: this.getCurrentUser(req),
-          requestBody: req.body,
-          responseBody,
         });
       });
 
@@ -36,15 +39,25 @@ class Logger {
     });
   }
 
-  logDatabase(sql) {
+  logDatabase(sql, status = 'success') {
+    const request = this.getCurrentRequest();
+    const statement = this.sanitizeSql(sql);
+    const method = sql.match(/^\s*([a-z]+)/i)?.[1]?.toUpperCase();
     this.log('database', {
-      query: this.sanitizeSql(sql),
+      level: status === 'error' ? 'error' : 'information',
+      Type: 'db',
+      method,
+      status,
+      path: request?.path,
+      ip: request?.ip || request?.socket?.remoteAddress,
+      query: statement,
       user: this.getCurrentUser(),
     });
   }
 
   logFactory(requestBody, responseBody, statusCode, error) {
     this.log('factory', {
+      level: error ? 'error' : this.getHttpLevel(statusCode),
       user: this.getCurrentUser(),
       requestBody,
       responseBody,
@@ -55,6 +68,7 @@ class Logger {
 
   logException(error, req) {
     this.log('exception', {
+      level: error.statusCode ? this.getHttpLevel(error.statusCode) : 'critical',
       name: error.name,
       message: this.sanitizeText(error.message || String(error)),
       stack: error.stack ? this.sanitizeText(error.stack) : undefined,
@@ -103,6 +117,20 @@ class Logger {
       return undefined;
     }
     return { id: user.id, name: user.name, email: user.email };
+  }
+
+  getCurrentRequest() {
+    return this.requestContext.getStore()?.req;
+  }
+
+  getHttpLevel(statusCode) {
+    if (statusCode >= 500) {
+      return 'error';
+    }
+    if (statusCode >= 400) {
+      return 'warning';
+    }
+    return 'information';
   }
 
   sanitizeSql(sql) {

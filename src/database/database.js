@@ -375,11 +375,16 @@ class DB {
   }
 
   async query(connection, sql, params, usePreparedStatement = true) {
-    logger.logDatabase(sql);
-    const [results] = usePreparedStatement
-      ? await connection.execute(sql, params)
-      : await connection.query(sql);
-    return results;
+    try {
+      const [results] = usePreparedStatement
+        ? await connection.execute(sql, params)
+        : await connection.query(sql);
+      logger.logDatabase(sql, 'success');
+      return results;
+    } catch (error) {
+      logger.logDatabase(sql, 'error');
+      throw error;
+    }
   }
 
   async getID(connection, key, value, table) {

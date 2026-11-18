@@ -374,9 +374,11 @@ class DB {
     return '';
   }
 
-  async query(connection, sql, params) {
+  async query(connection, sql, params, usePreparedStatement = true) {
     logger.logDatabase(sql);
-    const [results] = await connection.execute(sql, params);
+    const [results] = usePreparedStatement
+      ? await connection.execute(sql, params)
+      : await connection.query(sql);
     return results;
   }
 
@@ -403,7 +405,7 @@ class DB {
       decimalNumbers: true,
     });
     if (setUse) {
-      await this.query(connection, `USE ${config.db.connection.database}`);
+      await this.query(connection, `USE ${config.db.connection.database}`, undefined, false);
     }
     return connection;
   }
@@ -415,15 +417,15 @@ class DB {
         const dbExists = await this.checkDatabaseExists(connection);
         console.log(dbExists ? 'Database exists' : 'Database does not exist, creating it');
 
-        await this.query(connection, `CREATE DATABASE IF NOT EXISTS ${config.db.connection.database}`);
-        await this.query(connection, `USE ${config.db.connection.database}`);
+        await this.query(connection, `CREATE DATABASE IF NOT EXISTS ${config.db.connection.database}`, undefined, false);
+        await this.query(connection, `USE ${config.db.connection.database}`, undefined, false);
 
         if (!dbExists) {
           console.log('Successfully created database');
         }
 
         for (const statement of dbModel.tableCreateStatements) {
-          await this.query(connection, statement);
+          await this.query(connection, statement, undefined, false);
         }
 
         for (const item of defaultMenuItems) {

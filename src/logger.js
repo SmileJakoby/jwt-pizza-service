@@ -1,9 +1,11 @@
 const { AsyncLocalStorage } = require('node:async_hooks');
 const config = require('./config.js');
 
-const sensitiveKey = /(password|passwd|token|jwt|authorization|api.?key|secret|credential)/i;
+const sensitiveKey = /(password|passwd|token|jwt|authorization|api.?key|secret|credential|email|cookie|phone|ssn|credit.?card|card.?number|cvv)/i;
 const sensitiveText = /\b((?:password|passwd|token|jwt|authorization|api[_-]?key|secret|credential)\b["']?\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi;
 const bearerToken = /\bBearer\s+[^\s"'`,]+/gi;
+const jwtValue = /\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
+const emailValue = /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi;
 
 class Logger {
   constructor() {
@@ -116,7 +118,7 @@ class Logger {
     if (!user) {
       return undefined;
     }
-    return { id: user.id, name: user.name, email: user.email };
+    return { id: user.id, name: user.name };
   }
 
   getCurrentRequest() {
@@ -140,6 +142,8 @@ class Logger {
   sanitizeText(value) {
     return String(value)
       .replace(bearerToken, 'Bearer [REDACTED]')
+      .replace(jwtValue, '[REDACTED]')
+      .replace(emailValue, '[REDACTED]')
       .replace(sensitiveText, '$1[REDACTED]');
   }
 

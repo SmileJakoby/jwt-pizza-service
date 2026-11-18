@@ -78,4 +78,17 @@ describe('structured logs', () => {
     const entry = JSON.parse(payload.streams[0].values[0][1]);
     expect(entry.level).toBe('warning');
   });
+
+  test('factory logs and standalone PII values are sanitized', () => {
+    logger.logFactory(
+      { diner: { id: 8, name: 'Test User', email: 'test@example.com' } },
+      JSON.stringify({ jwt: 'eyJhbGci.payload.signature', reportUrl: 'https://example.com/report' }),
+      200
+    );
+
+    const payload = JSON.parse(global.fetch.mock.calls[0][1].body);
+    const entry = JSON.parse(payload.streams[0].values[0][1]);
+    expect(JSON.stringify(entry)).not.toContain('test@example.com');
+    expect(JSON.stringify(entry)).not.toContain('eyJhbGci.payload.signature');
+  });
 });

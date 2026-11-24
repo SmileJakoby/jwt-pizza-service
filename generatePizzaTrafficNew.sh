@@ -20,7 +20,7 @@ while [[ "$HOST" == */ ]]; do
   HOST=${HOST%/}
 done
 
-CURL_TIMEOUT=${CURL_TIMEOUT:-15}
+CURL_TIMEOUT=${CURL_TIMEOUT:-30}
 TRAFFIC_INTERVAL=${TRAFFIC_INTERVAL:-30}
 TRAFFIC_ONCE=${TRAFFIC_ONCE:-0}
 ADMIN_EMAIL=${ADMIN_EMAIL:-a@jwt.com}
@@ -50,6 +50,7 @@ request() {
     --request "$method" "$url" "$@" --write-out $'\n%{http_code}'); then
     HTTP_STATUS=000
     HTTP_BODY=''
+    echo "Request failed: $method $url (curl timeout or connection error; limit ${CURL_TIMEOUT}s)" >&2
     return 1
   fi
 

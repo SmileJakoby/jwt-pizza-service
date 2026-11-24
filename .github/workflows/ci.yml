@@ -145,6 +145,13 @@ jobs:
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
             --services "$ECS_SERVICE"
+      - name: Annotate deploymnet in Grafana
+        run: |
+          curl -s -X POST https://smilejakoby.grafana.net/api/annotations \
+          -H "Authorization: Bearer ${{ secrets.GRAFANA_ACCESS_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d '{"dashboardUID":"ja92z2j", "panelId":8, "tags":["backend","production"], "text":"Version '"$version"' deployed" }'
+
   release:
     needs:
       - build
